@@ -13,13 +13,19 @@
 |Reacher-v1     | -3.894341(1.580284)     | -13.215903(3.970900)| -13.954921(4.214502)|
 |Walker2d-v1    | 5523.786277(50.682188)  | 4305.271517(1845.930949)| 5516.414445(51.565740)|
 
+| | Behavior Cloning | Dagger |
+|:-:|:--------------:|:------:|
+|HalfCeetah-v1|![halfcheetah-v1-bc](/assets/halfcheetah-v1-bc.gif)|![halfcheetah-v1-da](/assets/halfcheetah-v1-da.gif)|
+|Hopper-v1|![hopper-v1-bc](/assets/hopper-v1-bc.gif)|![hopper-v1-da](/assets/hopper-v1-da.gif)|
+|Walker2D-v1|![walker2d-v1-bc](/assets/walker2d-v1-bc.gif)|![walker2d-v1-da](/assets/walkder2d-v1-da.gif)|
+
 - HalfCheetah, Hopper, Walker2d were trainable and others were not with fixed hyperparameters
 - In all three successful cases, DAgger gives better performance (higher rewards, lower std.)
 
 ## TODO
 
 - [x] HW 1; Imitation Learning, Dagger
-- [] HW 2
-- [] HW 3
-- [] HW 4
-- [] HW 5
+- [ ] HW 2
+- [ ] HW 3
+- [ ] HW 4
+- [ ] HW 5
