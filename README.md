@@ -22,10 +22,22 @@
 - HalfCheetah, Hopper, Walker2d were trainable and others were not with fixed hyperparameters
 - In all three successful cases, DAgger gives better performance (higher rewards, lower std.)
 
+## Result on HW4
+
+- I was able to train a policy with policy gradient method and given default hyperparameter and linear value function approximator.
+
+![behaviour of trained agent](/assets/hw4-pendulum.gif)
+
+- Changing value function approximator from linear approximator to neural network does not provide any benefit in trainig.
+![trained result on cartpole](/assets/hw4-cartpole_linearvf_vs_nnvf.png)
+![trained result on cartpole](/assets/hw4-pendulum_linearvf_vs_nnvf.png)
+
+- At the beggining, it fails to predict a value (negative explained variance, worse than predicting a constant); it could be better if we put some "annealing" steps.
+- Or, it might require more sohpiscated hyperparameter search.
+
 ## TODO
 
 - [x] HW 1; Imitation Learning, Dagger
 - [ ] HW 2
 - [ ] HW 3
-- [ ] HW 4
-- [ ] HW 5
+- [x] HW 4; Simple Policy Gradient

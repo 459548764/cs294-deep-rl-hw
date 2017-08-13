@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import gym
+from gym import wrappers
 import logz
 import scipy.signal
 
@@ -43,10 +44,10 @@ def discount(x, gamma):
 
 def explained_variance_1d(ypred,y):
     """
-    Var[ypred - y] / var[y]. 
+    Var[ypred - y] / var[y].
     https://www.quora.com/What-is-the-meaning-proportion-of-variance-explained-in-linear-regression
     """
-    assert y.ndim == 1 and ypred.ndim == 1    
+    assert y.ndim == 1 and ypred.ndim == 1
     vary = np.var(y)
     return np.nan if vary==0 else 1 - np.var(y-ypred)/vary
 
@@ -55,7 +56,7 @@ def categorical_sample_logits(logits):
     Samples (symbolically) from categorical distribution, where logits is a NxK
     matrix specifying N categorical distributions with K categories
 
-    specifically, exp(logits) / sum( exp(logits), axis=1 ) is the 
+    specifically, exp(logits) / sum( exp(logits), axis=1 ) is the
     probabilities of the different classes
 
     Cleverly uses gumbell trick, based on
@@ -85,7 +86,33 @@ class LinearValueFunction(object):
         return np.concatenate([np.ones([X.shape[0], 1]), X, np.square(X)/2.0], axis=1)
 
 class NnValueFunction(object):
-    pass # YOUR CODE HERE
+    def __init__(self,ob_dim,n_epochs,stepsize):
+        sy_ob_no = tf.placeholder(shape=[None, ob_dim*2+1], name="val_ob", dtype=tf.float32) # batch of observations
+        sy_h1 = lrelu(dense(sy_ob_no, 32, "val_h1", weight_init=normc_initializer(1.0))) # hidden layer
+        sy_h2 = lrelu(dense(sy_h1, 32, "val_h2", weight_init=normc_initializer(1.0))) # hidden layer
+        sy_val = tf.squeeze(dense(sy_h2, 1, "val_fn", weight_init=normc_initializer(0.05))) # value function
+
+        sy_target = tf.placeholder(shape=[None], name='val_target', dtype=tf.float32)
+        loss = 0.5 * tf.reduce_mean( (sy_target-sy_val)**2 )
+        update_op = tf.train.AdamOptimizer(stepsize).minimize(loss)
+
+        self.sy_ob_no = sy_ob_no
+        self.sy_val = sy_val
+        self.sy_target = sy_target
+        self.loss = loss
+        self.update_num = n_epochs
+        self.update_op = update_op
+
+    def fit(self, X, y):
+        sess = tf.get_default_session()
+        for _ in range(self.update_num):
+            _, loss = sess.run([self.update_op, self.loss], feed_dict={self.sy_ob_no : self.preproc(X), self.sy_target: y})
+    def predict(self, X):
+        sess = tf.get_default_session()
+        return sess.run(self.sy_val, feed_dict={self.sy_ob_no : self.preproc(X)})
+    def preproc(self, X):
+        return np.concatenate([np.ones([X.shape[0], 1]), X, np.square(X)/2.0], axis=1)
+        #return X
 
 def lrelu(x, leak=0.2):
     f1 = 0.5 * (1 + leak)
@@ -94,12 +121,19 @@ def lrelu(x, leak=0.2):
 
 
 
-def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=1e-2, animate=True, logdir=None):
+def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=1e-2, animate=True, logdir=None, vf_type='linear', seed=0):
+    tf.set_random_seed(seed)
+    np.random.seed(seed)
+
     env = gym.make("CartPole-v0")
     ob_dim = env.observation_space.shape[0]
     num_actions = env.action_space.n
     logz.configure_output_dir(logdir)
-    vf = LinearValueFunction()
+
+    if vf_type == 'linear':
+        vf = LinearValueFunction()
+    elif vf_type == 'nn':
+        vf = NnValueFunction(ob_dim=ob_dim, n_epochs=10, stepsize=1e-2)
 
     # Symbolic variables have the prefix sy_, to distinguish them from the numerical values
     # that are computed later in these function
@@ -117,7 +151,7 @@ def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=
 
     # The following quantities are just used for computing KL and entropy, JUST FOR DIAGNOSTIC PURPOSES >>>>
     sy_oldlogp_na = tf.nn.log_softmax(sy_oldlogits_na)
-    sy_oldp_na = tf.exp(sy_oldlogp_na) 
+    sy_oldp_na = tf.exp(sy_oldlogp_na)
     sy_kl = tf.reduce_sum(sy_oldp_na * (sy_oldlogp_na - sy_logp_na)) / tf.to_float(sy_n)
     sy_p_na = tf.exp(sy_logp_na)
     sy_ent = tf.reduce_sum( - sy_p_na * sy_logp_na) / tf.to_float(sy_n)
@@ -128,7 +162,7 @@ def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=
     sy_stepsize = tf.placeholder(shape=[], dtype=tf.float32) # Symbolic, in case you want to change the stepsize during optimization. (We're not doing that currently)
     update_op = tf.train.AdamOptimizer(sy_stepsize).minimize(sy_surr)
 
-    tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1) 
+    tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
     # use single thread. on such a small problem, multithreading gives you a slowdown
     # this way, we can better use multiple cores for different experiments
     sess = tf.Session(config=tf_config)
@@ -149,15 +183,15 @@ def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=
             obs, acs, rewards = [], [], []
             animate_this_episode=(len(paths)==0 and (i % 10 == 0) and animate)
             while True:
-                if animate_this_episode:
-                    env.render()
+                #if animate_this_episode:
+                #    env.render()
                 obs.append(ob)
                 ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob[None]})
                 acs.append(ac)
                 ob, rew, done, _ = env.step(ac)
                 rewards.append(rew)
                 if done:
-                    break                    
+                    break
             path = {"observation" : np.array(obs), "terminated" : terminated,
                     "reward" : np.array(rewards), "action" : np.array(acs)}
             paths.append(path)
@@ -201,7 +235,9 @@ def main_cartpole(n_iter=100, gamma=1.0, min_timesteps_per_batch=1000, stepsize=
         # Note that we fit value function AFTER using it to compute the advantage function to avoid introducing bias
         logz.dump_tabular()
 
-def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_stepsize, desired_kl, vf_type, vf_params, animate=False):
+def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_stepsize, desired_kl, vf_type, vf_params, save=False, animate=False):
+    EPSILON=1e-8
+
     tf.set_random_seed(seed)
     np.random.seed(seed)
     env = gym.make("Pendulum-v0")
@@ -213,14 +249,34 @@ def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_
     elif vf_type == 'nn':
         vf = NnValueFunction(ob_dim=ob_dim, **vf_params)
 
+    # Symbolic variables have the prefix sy_, to distinguish them from the numerical values
+    # that are computed later in these function
+    sy_ob_no = tf.placeholder(shape=[None, ob_dim], name="ob", dtype=tf.float32) # batch of observations
+    sy_h1 = lrelu(dense(sy_ob_no, 32, "h1", weight_init=normc_initializer(1.0))) # hidden layer
+    sy_h2 = lrelu(dense(sy_h1, 32, "h2", weight_init=normc_initializer(1.0))) # hidden layer
+    sy_mean_na = dense(sy_h2, ac_dim, "final", weight_init=normc_initializer(0.05)) # means of gaussians for each action dim, describing probability distribution of final layer
+    sy_logstd_na = tf.get_variable("log_sigma",[ac_dim], initializer=tf.zeros_initializer()) # log sigma of gaussians for each action dim
+    # we use a small initialization for the last layer, so the initial policy has maximal entropy
 
-    YOUR_CODE_HERE
+    sy_n = tf.shape(sy_ob_no)[0] #batch size
+    dist = tf.contrib.distributions.Normal(loc=sy_mean_na,scale=tf.exp(sy_logstd_na+EPSILON),validate_args=True) #[sy_no,ac_dim], scale argument seems broadcasted automatically to fit with shape of loc.
+    sy_sampled_ac = dist.sample()
 
+    sy_ac_n = tf.placeholder(shape=[None,ac_dim], name="ac_taken", dtype=tf.float32)
+    sy_logprob_n = tf.reduce_sum(dist.log_prob(sy_ac_n),axis=1)
 
+    sy_old_mean_na = tf.placeholder(shape=[None,ac_dim], name="old_mean", dtype=tf.float32) # sufficient statistics for old policy
+    sy_old_logstd_na = tf.placeholder(shape=[ac_dim], name="old_logstd", dtype=tf.float32) # sufficient statistics for old policy
+    old_dist = tf.contrib.distributions.Normal(loc=sy_old_mean_na,scale=tf.exp(sy_old_logstd_na+EPSILON)) #tf.tile(tf.exp(sy_old_logstd_na+EPSILON),[sy_n,1]))
+
+    sy_adv_n = tf.placeholder(shape=[None], name="adv", dtype=tf.float32) # advantage function estimate
     sy_surr = - tf.reduce_mean(sy_adv_n * sy_logprob_n) # Loss function that we'll differentiate to get the policy gradient ("surr" is for "surrogate loss")
 
     sy_stepsize = tf.placeholder(shape=[], dtype=tf.float32) # Symbolic, in case you want to change the stepsize during optimization. (We're not doing that currently)
     update_op = tf.train.AdamOptimizer(sy_stepsize).minimize(sy_surr)
+
+    sy_ent = tf.reduce_sum(dist.entropy()) / tf.to_float(sy_n) # observing statistics for training
+    sy_kl = tf.reduce_sum(tf.contrib.distributions.kl_divergence(old_dist,dist)) / tf.to_float(sy_n)
 
     sess = tf.Session()
     sess.__enter__() # equivalent to `with sess:`
@@ -232,17 +288,69 @@ def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_
     for i in range(n_iter):
         print("********** Iteration %i ************"%i)
 
-        YOUR_CODE_HERE
+        # Collect paths until we have enough timesteps
+        timesteps_this_batch = 0
+        paths = []
+        while True:
+            ob = env.reset()
+            terminated = False
+            obs, acs, rewards = [], [], []
+            animate_this_episode=(len(paths)==0 and (i % 10 == 0) and animate)
+            while True:
+                #if animate_this_episode:
+                #    env.render()
+                obs.append(ob.flatten())
+                ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob.flatten()[None]})
+                acs.append(ac.flatten())
+                ob, rew, done, _ = env.step(ac.flatten())
+                rewards.append(rew.flatten()[0])
+                if done:
+                    break
+            path = {"observation" : np.array(obs), "terminated" : terminated,
+                    "reward" : np.array(rewards), "action" : np.array(acs)}
+            paths.append(path)
+            timesteps_this_batch += pathlength(path)
+            if timesteps_this_batch > min_timesteps_per_batch:
+                break
+        total_timesteps += timesteps_this_batch
+        # Estimate advantage function
+        vtargs, vpreds, advs = [], [], []
+        for path in paths:
+            rew_t = path["reward"]
+            return_t = discount(rew_t, gamma)
+            vpred_t = vf.predict(path["observation"])
+            adv_t = return_t - vpred_t
+            advs.append(adv_t)
+            vtargs.append(return_t)
+            vpreds.append(vpred_t)
 
-        if kl > desired_kl * 2: 
+        # Build arrays for policy update
+        ob_no = np.concatenate([path["observation"] for path in paths])
+        ac_n = np.concatenate([path["action"] for path in paths])
+        adv_n = np.concatenate(advs)
+        standardized_adv_n = (adv_n - adv_n.mean()) / (adv_n.std() + 1e-8)
+        vtarg_n = np.concatenate(vtargs)
+        vpred_n = np.concatenate(vpreds)
+        vf.fit(ob_no, vtarg_n)
+
+        # Policy update
+        _, old_mean_na, old_logstd_na = sess.run([update_op, sy_mean_na, sy_logstd_na],
+                                                 feed_dict={sy_ob_no:ob_no,
+                                                            sy_ac_n:ac_n,
+                                                            sy_adv_n:standardized_adv_n,
+                                                            sy_stepsize:stepsize})
+        kl, ent = sess.run([sy_kl, sy_ent], feed_dict={sy_ob_no:ob_no,
+                                                       sy_old_mean_na:old_mean_na,
+                                                       sy_old_logstd_na:old_logstd_na})
+
+        if kl > desired_kl * 2:
             stepsize /= 1.5
             print('stepsize -> %s'%stepsize)
-        elif kl < desired_kl / 2: 
+        elif kl < desired_kl / 2:
             stepsize *= 1.5
             print('stepsize -> %s'%stepsize)
         else:
             print('stepsize OK')
-
 
         # Log diagnostics
         logz.log_tabular("EpRewMean", np.mean([path["reward"].sum() for path in paths]))
@@ -256,13 +364,40 @@ def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_
         # Note that we fit value function AFTER using it to compute the advantage function to avoid introducing bias
         logz.dump_tabular()
 
+        if(save):
+            env = wrappers.Monitor(env,'/tmp/pendulum/',force=True)
+            ob = env.reset(); done=False
+            while not done:
+                ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob.flatten()[None]})
+                ob, rew, done, _ = env.step(ac.flatten())
+
+def main_cartpole1(d):
+    return main_cartpole(**d)
 
 def main_pendulum1(d):
     return main_pendulum(**d)
 
 if __name__ == "__main__":
+    if 0:
+        main_cartpole(logdir=None,vf_type='linear') # when you want to start collecting results, set the logdir
+        #main_cartpole(logdir=None,vf_type='nn') # when you want to start collecting results, set the logdir
     if 1:
-        main_cartpole(logdir=None) # when you want to start collecting results, set the logdir
+        general_params = dict(gamma=0.97, animate=False, min_timesteps_per_batch=2500, n_iter=300, initial_stepsize=1e-3, save=True)
+        params = dict(logdir=None, seed=0, desired_kl=2e-3, vf_type='linear', vf_params={}, **general_params)
+        #params = dict(logdir=None, seed=0, desired_kl=2e-3, vf_type='nn', vf_params=dict(n_epochs=10, stepsize=1e-3), **general_params)
+        main_pendulum(**params)
+    if 0:
+        params = [
+            #dict(logdir='/tmp/cartpole/linearvf-seed0', seed=0, vf_type='linear'),
+            #dict(logdir='/tmp/cartpole/nnvf-seed0', seed=0, vf_type='nn'),
+            dict(logdir='/tmp/cartpole/linearvf-seed1', seed=1, vf_type='linear'),
+            dict(logdir='/tmp/cartpole/nnvf-seed1', seed=1, vf_type='nn'),
+            #dict(logdir='/tmp/cartpole/linearvf-seed2', seed=2, vf_type='linear'),
+            #dict(logdir='/tmp/cartpole/nnvf-seed2', seed=2, vf_type='nn'),
+        ]
+        import multiprocessing
+        p = multiprocessing.Pool()
+        p.map(main_cartpole1, params)
     if 0:
         general_params = dict(gamma=0.97, animate=False, min_timesteps_per_batch=2500, n_iter=300, initial_stepsize=1e-3)
         params = [
