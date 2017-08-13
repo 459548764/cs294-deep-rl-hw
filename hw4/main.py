@@ -364,12 +364,12 @@ def main_pendulum(logdir, seed, n_iter, gamma, min_timesteps_per_batch, initial_
         # Note that we fit value function AFTER using it to compute the advantage function to avoid introducing bias
         logz.dump_tabular()
 
-        if(save):
-            env = wrappers.Monitor(env,'/tmp/pendulum/',force=True)
-            ob = env.reset(); done=False
-            while not done:
-                ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob.flatten()[None]})
-                ob, rew, done, _ = env.step(ac.flatten())
+    if(save):
+        env = wrappers.Monitor(env,'/tmp/pendulum/',force=True)
+        ob = env.reset(); done=False
+        while not done:
+            ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob.flatten()[None]})
+            ob, rew, done, _ = env.step(ac.flatten())
 
 def main_cartpole1(d):
     return main_cartpole(**d)
